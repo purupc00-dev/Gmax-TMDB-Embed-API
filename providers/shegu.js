@@ -26,18 +26,27 @@ async function getSheguStreams(tmdbId, mediaType = 'movie', season = null, episo
       return [];
     }
 
-    // 3. Map Shegu's links into your backend's unified stream format
+    /// 3. Map Shegu's links into your backend's unified stream format
     const streams = data.links
       .filter(item => item && item.url)
-      .map(item => ({
-        name: `Shegu - ${item.source || 'Cinejoy'} (${item.quality || 'Auto'}p)`,
-        title: item.name || `Shegu Download - ${item.quality || 'Auto'}p`,
-        url: item.url,
-        quality: item.quality ? `${item.quality}p` : '1080p',
-        size: item.size || '',
-        provider: 'shegu',
-        headers: {}
-      }));
+      .map(item => {
+        // item.source already perfectly contains "4K CINEJOY", "Onedrive", etc.
+        const sourceName = item.source || '4K CINEJOY';
+        
+        return {
+          // This will show exactly: "4K CINEJOY (1080p)" or "Onedrive (1080p)"
+          name: `${sourceName} (${item.quality || 'Auto'}p)`,
+          // We use the exact filename they provide, or a fallback
+          title: item.name || `${sourceName} Download`,
+          url: item.url,
+          quality: item.quality ? `${item.quality}p` : '1080p',
+          size: item.size || '',
+          // Changing this from 'shegu' to '4K CINEJOY' changes the main group box name in your UI!
+          provider: '4K CINEJOY', 
+          headers: {}
+        };
+      });
+    
 
     console.log(`[Shegu] Successfully processed ${streams.length} stream(s)`);
     return streams;
