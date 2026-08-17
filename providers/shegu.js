@@ -1,6 +1,7 @@
 const axios = require('axios');
+const cheerio = require('cheerio');
 
-async function getSheguStreams(tmdbId, mediaType = 'movie', season = null, episode = null) {
+async function getSheguStreams(tmdbId, mediaType, season = null, episode = null) {
   try {
     // 1. Normalize mediaType ('series' -> 'tv')
     const type = mediaType === 'series' || mediaType === 'tv' ? 'tv' : 'movie';
@@ -8,52 +9,49 @@ async function getSheguStreams(tmdbId, mediaType = 'movie', season = null, episo
       ? `https://downloads.shegu.st/movie/${tmdbId}` 
       : `https://downloads.shegu.st/tv/${tmdbId}/${season}/${episode}`;
 
-    console.log(`[Shegu] Fetching JSON API: ${url}`);
+    console.log(`[Shegu] Fetching URL: ${url}`);
 
-    // 2. Fetch the JSON directly from Shegu
+    // 2. Fetch the HTML page from Shegu
     const response = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       },
-      timeout: 10000 
+      timeout: 8000 
     });
 
-    const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-    
-    if (!data || !Array.isArray(data.links)) {
-      console.log('[Shegu] No links array found in JSON response.');
-      return [];
-    }
+    const $ = cheerio.load(response.data);
+    const streams = [];
 
-    /// 3. Map Shegu's links into your backend's unified stream format
-    const streams = data.links
-      .filter(item => item && item.url)
-      .map(item => {
-        // item.source already perfectly contains "4K CINEJOY", "Onedrive", etc.
-        const sourceName = item.source || '4K CINEJOY';
+    // 3. Find the download links on the page using Cheerio (original working logic)
+    $('a').each((index, element) => {
+      const link = $(element).attr('href');
+      const text = $(element).text().toLowerCase();
+      
+      if (link && (link.includes('.m3u8') || link.includes('.mp4') || link.includes('.mkv'))) {
+        // Guess the quality based on the button text
+        const qualityText = text.includes('2160') ? '2160p' : text.includes('720') ? '720p' : '1080p';
         
-        return {
-          // This will show exactly: "4K CINEJOY (1080p)" or "Onedrive (1080p)"
-          name: `${sourceName} (${item.quality || 'Auto'}p)`,
-          // We use the exact filename they provide, or a fallback
-          title: item.name || `${sourceName} Download`,
-          url: item.url,
-          quality: item.quality ? `${item.quality}p` : '1080p',
-          size: item.size || '',
-          // Changing this from 'shegu' to '4K CINEJOY' changes the main group box name in your UI!
+        // Grab the actual text from the link for the title
+        const originalText = $(element).text().trim() || '4K CINEJOY Download';
+        
+        streams.push({
+          name: `4K CINEJOY (${qualityText})`,
+          title: originalText,
+          url: link.startsWith('http') ? link : `https://downloads.shegu.st${link}`,
+          quality: qualityText,
+          // Changing provider groups it under a "4K CINEJOY" box in your frontend
           provider: '4K CINEJOY', 
           headers: {}
-        };
-      });
-    
+        });
+      }
+    });
 
-    console.log(`[Shegu] Successfully processed ${streams.length} stream(s)`);
+    console.log(`[Shegu] Found ${streams.length} streams.`);
     return streams;
 
   } catch (error) {
-    console.error(`[Shegu] Request failed for ${tmdbId}: ${error.message}`);
-    return [];
+    console.warn(`[Shegu] Scrape failed for ${tmdbId}: ${error.message}`);
+    return []; 
   }
 }
 
