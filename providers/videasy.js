@@ -4,22 +4,23 @@ const { getTmdbApiKey } = require('../utils/tmdbKey');
 const VIDEASY_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
     'Accept': 'application/json, text/plain, */*',
-    'Origin': 'https://player.videasy.net',
-    'Referer': 'https://player.videasy.net/'
+    // CHANGED: New Origin and Referer
+    'Origin': 'https://player.videasy.to',
+    'Referer': 'https://player.videasy.to/'
 };
 
-// Each server maps a name to its API URL. moviesOnly:true skips TV requests.
+// CHANGED: Replaced api.videasy.net with api.speedracelight.com and updated paths
 const SERVERS = {
-    'Neon':   { url: 'https://api.videasy.net/myflixerzupcloud/sources-with-title' },
-    'Yoru':   { url: 'https://api.videasy.net/cdn/sources-with-title', moviesOnly: true },
-    'Cypher': { url: 'https://api.videasy.net/moviebox/sources-with-title' },
-    'Reyna':  { url: 'https://api.videasy.net/primewire/sources-with-title' },
-    'Omen':   { url: 'https://api.videasy.net/onionplay/sources-with-title' },
-    'Breach': { url: 'https://api.videasy.net/m4uhd/sources-with-title' },
-    'Ghost':  { url: 'https://api.videasy.net/primesrcme/sources-with-title' },
-    'Sage':   { url: 'https://api.videasy.net/1movies/sources-with-title' },
-    'Vyse':   { url: 'https://api.videasy.net/hdmovie/sources-with-title' },
-    'Raze':   { url: 'https://api.videasy.net/superflix/sources-with-title' }
+    'Neon':   { url: 'https://api.speedracelight.com/vsrc/sources-with-title' },
+    'Yoru':   { url: 'https://api.speedracelight.com/cdn/sources-with-title', moviesOnly: true },
+    'Cypher': { url: 'https://api.speedracelight.com/moviebox/sources-with-title' },
+    'Reyna':  { url: 'https://api.speedracelight.com/primewire/sources-with-title' },
+    'Omen':   { url: 'https://api.speedracelight.com/lamovie/sources-with-title' },
+    'Breach': { url: 'https://api.speedracelight.com/m4uhd/sources-with-title' },
+    'Ghost':  { url: 'https://api.speedracelight.com/primesrcme/sources-with-title' },
+    'Sage':   { url: 'https://api.speedracelight.com/1movies/sources-with-title' },
+    'Vyse':   { url: 'https://api.speedracelight.com/hdmovie/sources-with-title' },
+    'Raze':   { url: 'https://api.speedracelight.com/superflix/sources-with-title' }
 };
 
 const DECRYPT_URL = 'https://enc-dec.app/api/dec-videasy';
@@ -57,6 +58,22 @@ async function getVideasyStreams(tmdbId, mediaType = 'movie', seasonNum = null, 
         return [];
     }
 
+    // ADDED: Fetch the new required security seed
+    let seed = "";
+    try {
+        const seedRes = await axios.get(`https://api.speedracelight.com/seed?mediaId=${tmdbId}`, {
+            headers: VIDEASY_HEADERS,
+            timeout: 5000
+        });
+        seed = seedRes.data.seed;
+    } catch (err) {
+        console.error(`[Videasy] Failed to fetch security seed: ${err.message}`);
+        return [];
+    }
+
+    // ADDED: Double URL encode the title
+    const encTitle = encodeURIComponent(encodeURIComponent(details.title));
+
     const allStreams = [];
     const seen = new Set();
 
@@ -64,9 +81,10 @@ async function getVideasyStreams(tmdbId, mediaType = 'movie', seasonNum = null, 
     await Promise.all(Object.entries(SERVERS).map(async ([name, server]) => {
         if (server.moviesOnly && mediaType === 'tv') return;
 
-        let apiUrl = `${server.url}?title=${encodeURIComponent(details.title)}`
+        // CHANGED: Use encTitle and add enc=2 & seed parameters
+        let apiUrl = `${server.url}?title=${encTitle}`
             + `&mediaType=${details.type}&year=${details.year}`
-            + `&tmdbId=${tmdbId}&imdbId=${details.imdbId || ''}`;
+            + `&tmdbId=${tmdbId}&imdbId=${details.imdbId || ''}&enc=2&seed=${seed}`;
         if (mediaType === 'tv') apiUrl += `&seasonId=${seasonNum}&episodeId=${episodeNum}`;
 
         try {
@@ -80,8 +98,9 @@ async function getVideasyStreams(tmdbId, mediaType = 'movie', seasonNum = null, 
             if (!encryptedText || encryptedText.length < 20 || encryptedText.startsWith('<')) return;
 
             // Step 3: Decrypt via enc-dec.app
+            // CHANGED: Include the seed in the payload
             const decRes = await axios.post(DECRYPT_URL,
-                { text: encryptedText, id: String(tmdbId) },
+                { text: encryptedText, id: String(tmdbId), seed: seed },
                 { headers: { 'Content-Type': 'application/json' }, timeout: 8000 }
             );
 
@@ -98,8 +117,9 @@ async function getVideasyStreams(tmdbId, mediaType = 'movie', seasonNum = null, 
                     quality: s.quality || 'Auto',
                     provider: 'Videasy',
                     headers: {
-                        'Referer': 'https://player.videasy.net/',
-                        'Origin': 'https://player.videasy.net'
+                        // CHANGED: Output the new referer domains back to the client
+                        'Referer': 'https://player.videasy.to/',
+                        'Origin': 'https://player.videasy.to'
                     }
                 });
             }
