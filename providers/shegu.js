@@ -1,5 +1,4 @@
 const axios = require('axios');
-const cheerio = require('cheerio');
 
 async function getSheguStreams(tmdbId, mediaType, season = null, episode = null) {
   try {
@@ -9,48 +8,47 @@ async function getSheguStreams(tmdbId, mediaType, season = null, episode = null)
       ? `https://downloads.shegu.st/movie/${tmdbId}` 
       : `https://downloads.shegu.st/tv/${tmdbId}/${season}/${episode}`;
 
-    console.log(`[Shegu] Fetching URL: ${url}`);
+    console.log(`[4K Cinejoy] Fetching JSON API: ${url}`);
 
-    // 2. Fetch the HTML page from Shegu
+    // 2. Fetch the JSON directly from the endpoint
     const response = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*'
       },
-      timeout: 8000 
+      timeout: 10000 
     });
 
-    const $ = cheerio.load(response.data);
-    const streams = [];
+    const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+    
+    if (!data || !Array.isArray(data.links)) {
+      console.log('[4K Cinejoy] No links array found in JSON response.');
+      return [];
+    }
 
-    // 3. Find the download links on the page using Cheerio (original working logic)
-    $('a').each((index, element) => {
-      const link = $(element).attr('href');
-      const text = $(element).text().toLowerCase();
-      
-      if (link && (link.includes('.m3u8') || link.includes('.mp4') || link.includes('.mkv'))) {
-        // Guess the quality based on the button text
-        const qualityText = text.includes('2160') ? '2160p' : text.includes('720') ? '720p' : '1080p';
-        
-        // Grab the actual text from the link for the title
-        const originalText = $(element).text().trim() || '4K CINEJOY Download';
-        
-        streams.push({
-          name: `4K CINEJOY (${qualityText})`,
-          title: originalText,
-          url: link.startsWith('http') ? link : `https://downloads.shegu.st${link}`,
-          quality: qualityText,
-          // Changing provider groups it under a "4K CINEJOY" box in your frontend
+    // 3. Map the JSON links into your backend's unified stream format
+    const streams = data.links
+      .filter(item => item && item.url)
+      .map(item => {
+        const sourceName = item.source || '4K CINEJOY';
+        const qualityVal = item.quality ? `${item.quality}p` : '1080p';
+
+        return {
+          name: `${sourceName} (${qualityVal})`,
+          title: item.name || `${sourceName} Download`,
+          url: item.url,
+          quality: qualityVal,
+          size: item.size || '',
           provider: '4K CINEJOY', 
           headers: {}
-        });
-      }
-    });
+        };
+      });
 
-    console.log(`[Shegu] Found ${streams.length} streams.`);
+    console.log(`[4K Cinejoy] Successfully processed ${streams.length} stream(s)`);
     return streams;
 
   } catch (error) {
-    console.warn(`[Shegu] Scrape failed for ${tmdbId}: ${error.message}`);
+    console.warn(`[4K Cinejoy] Request failed for ${tmdbId}: ${error.message}`);
     return []; 
   }
 }
