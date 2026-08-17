@@ -15,6 +15,7 @@ const providerFunctionMap = {
   'lordflix.js': 'getLordflixStreams',
   'notorrent.js': 'getNotorrentStreams',
   'dahmermovies.js': 'getDahmermoviesStreams',
+  'shegu.js': 'getSheguStreams',
 };
 
 // Stats for debug endpoint
