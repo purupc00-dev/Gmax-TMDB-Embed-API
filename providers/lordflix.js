@@ -3,19 +3,12 @@ const { getTmdbApiKey } = require('../utils/tmdbKey');
 
 const LORDFLIX_HEADERS = {
     'Accept': '*/*',
-    'Origin': 'https://lordflix.org',
-    'Referer': 'https://lordflix.org/',
+    'Origin': 'https://yflix.to',
+    'Referer': 'https://yflix.to/',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
 };
 
-const LORDFLIX_API = 'https://snowhouse.lordflix.club';
 const MULTI_DECRYPT_API = 'https://enc-dec.app/api';
-const SERVERS = ['Berlin', 'Marseille', 'Backrooms', 'Phoenix', 'Oslo', 'Luna', 'Sakura', 'Rio', 'Ativa', 'Moscow'];
-
-// Matches the reference project's encodeQuote: encodeURIComponent with + encoded as %20
-function encodeQuote(str) {
-    return encodeURIComponent(str).replace(/%20/g, '+').replace(/\+/g, '%20');
-}
 
 async function getLordflixStreams(tmdbId, mediaType = 'movie', seasonNum = null, episodeNum = null) {
     console.log(`[Lordflix] Fetching streams for TMDB ID: ${tmdbId}, Type: ${mediaType}`);
@@ -26,93 +19,95 @@ async function getLordflixStreams(tmdbId, mediaType = 'movie', seasonNum = null,
         return [];
     }
 
-    // Step 1: TMDB lookup for title, year, imdbId
-    let info;
     try {
-        const type = mediaType === 'tv' ? 'tv' : 'movie';
-        const { data } = await axios.get(
-            `https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${tmdbKey}&append_to_response=external_ids`,
-            { timeout: 8000 }
-        );
-        info = {
-            title: data.title || data.name || '',
-            year: (data.release_date || data.first_air_date || '').split('-')[0],
-            imdbId: (data.external_ids && data.external_ids.imdb_id) || ''
-        };
-    } catch (err) {
-        console.error(`[Lordflix] TMDB lookup failed: ${err.message}`);
-        return [];
-    }
-
-    if (!info.title || !info.imdbId) {
-        console.error('[Lordflix] Missing title or IMDb ID from TMDB.');
-        return [];
-    }
-
-    const typeParam = mediaType === 'tv' ? 'series' : 'movie';
-    const titleEnc = encodeQuote(info.title);
-    const streams = [];
-
-    // Step 2: Query each server in parallel
-    await Promise.all(SERVERS.map(async (server) => {
-        try {
-            let serverUrl = `${LORDFLIX_API}/?title=${titleEnc}&type=${typeParam}&year=${info.year || ''}`
-                + `&imdb=${info.imdbId}&tmdb=${tmdbId}&server=${server}`;
-            if (mediaType === 'tv') {
-                serverUrl += `&season=${seasonNum}&episode=${episodeNum}`;
-            }
-
-            // Step 3: Get signed proxy URL from enc-dec.app
-            const encBridgeRes = await axios.get(
-                `${MULTI_DECRYPT_API}/enc-lordflix?url=${encodeQuote(serverUrl)}`,
-                { timeout: 8000 }
-            );
-            const encBridgeJson = encBridgeRes.data;
-            if (!encBridgeJson || encBridgeJson.status !== 200 || !encBridgeJson.result) return;
-
-            const { url: proxyEncUrl, sign: signature } = encBridgeJson.result;
-            if (!proxyEncUrl || !signature) return;
-
-            // Step 4: Fetch encrypted stream data from proxy URL
-            const remoteEncRes = await axios.get(proxyEncUrl, {
-                headers: LORDFLIX_HEADERS,
-                timeout: 8000,
-                responseType: 'text'
-            });
-            const remoteEncData = typeof remoteEncRes.data === 'string'
-                ? remoteEncRes.data
-                : JSON.stringify(remoteEncRes.data);
-
-            // Step 5: Decrypt via enc-dec.app
-            const decRes = await axios.post(`${MULTI_DECRYPT_API}/dec-lordflix`,
-                { text: remoteEncData, sign: signature },
-                { headers: { 'Content-Type': 'application/json' }, timeout: 8000 }
-            );
-            const finalJson = decRes.data;
-            if (!finalJson || finalJson.status !== 200 || !finalJson.result || finalJson.result.error) return;
-
-            const streamList = finalJson.result.stream;
-            if (!Array.isArray(streamList) || streamList.length === 0) return;
-
-            const topStream = streamList[0];
-            if (topStream.type === 'hls' && topStream.playlist) {
-                streams.push({
-                    name: `Lordflix[${server}]`,
-                    title: `Lordflix[${server}]`,
-                    url: topStream.playlist,
-                    quality: 'Auto',
-                    provider: 'Lordflix',
-                    headers: LORDFLIX_HEADERS
-                });
-                console.log(`[Lordflix] Server ${server}: got stream.`);
-            }
-        } catch (err) {
-            console.error(`[Lordflix] Server ${server} error: ${err.message}`);
+        const type = mediaType === 'tv' || mediaType === 'series' ? 'tv' : 'movie';
+        
+        // Find yFlix ID from database using tmdb_id
+        const dbRes = await axios.get(`https://enc-dec.app/db/flix/find?tmdb_id=${tmdbId}`, { timeout: 8000 });
+        const flixData = dbRes.data?.result || dbRes.data;
+        if (!flixData || !flixData.id) {
+            console.log('[Lordflix] Content ID not found in database.');
+            return [];
         }
-    }));
 
-    console.log(`[Lordflix] Total streams: ${streams.length}`);
-    return streams;
+        const contentId = flixData.id;
+        let targetEid = contentId;
+
+        if (type === 'tv') {
+            const encEpRes = await axios.get(`${MULTI_DECRYPT_API}/enc-movies-flix?text=${encodeURIComponent(contentId)}`, { timeout: 8000 });
+            const encEp = encEpRes.data?.result || encEpRes.data;
+
+            const epListRes = await axios.get(`https://yflix.to/ajax/episodes/list?id=${contentId}&_=${encEp}`, {
+                headers: LORDFLIX_HEADERS,
+                timeout: 8000
+            });
+            const epData = epListRes.data;
+            if (epData && Array.isArray(epData.episodes)) {
+                const foundEp = epData.episodes.find(ep => ep.season === Number(seasonNum) && ep.episode === Number(episodeNum));
+                targetEid = foundEp ? foundEp.id : epData.episodes[0]?.id;
+            }
+        }
+
+        if (!targetEid) return [];
+
+        const encEidRes = await axios.get(`${MULTI_DECRYPT_API}/enc-movies-flix?text=${encodeURIComponent(targetEid)}`, { timeout: 8000 });
+        const encEid = encEidRes.data?.result || encEidRes.data;
+
+        const serversRes = await axios.get(`https://yflix.to/ajax/links/list?eid=${targetEid}&_=${encEid}`, {
+            headers: LORDFLIX_HEADERS,
+            timeout: 8000
+        });
+
+        const serverList = serversRes.data?.result || serversRes.data;
+        if (!Array.isArray(serverList) || serverList.length === 0) return [];
+
+        const streams = [];
+
+        await Promise.all(serverList.map(async (srv) => {
+            try {
+                const sId = srv.id || srv.lid;
+                if (!sId) return;
+
+                const encSrvRes = await axios.get(`${MULTI_DECRYPT_API}/enc-movies-flix?text=${encodeURIComponent(sId)}`, { timeout: 8000 });
+                const encSrv = encSrvRes.data?.result || encSrvRes.data;
+
+                const embedRes = await axios.get(`https://yflix.to/ajax/links/view?id=${sId}&_=${encSrv}`, {
+                    headers: LORDFLIX_HEADERS,
+                    timeout: 8000
+                });
+
+                const rawResult = embedRes.data?.result || embedRes.data;
+                if (!rawResult) return;
+
+                const decRes = await axios.post(`${MULTI_DECRYPT_API}/dec-movies-flix`,
+                    { text: typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult) },
+                    { headers: { 'Content-Type': 'application/json' }, timeout: 8000 }
+                );
+
+                const finalStream = decRes.data?.result || decRes.data;
+                const playUrl = finalStream?.url || finalStream?.file || finalStream?.stream;
+
+                if (playUrl) {
+                    streams.push({
+                        name: `Lordflix[${srv.name || 'Server'}]`,
+                        title: `Lordflix[${srv.name || 'Server'}]`,
+                        url: playUrl,
+                        quality: 'Auto',
+                        provider: 'Lordflix',
+                        headers: LORDFLIX_HEADERS
+                    });
+                }
+            } catch {
+                // Ignore server error
+            }
+        }));
+
+        console.log(`[Lordflix] Total streams: ${streams.length}`);
+        return streams;
+    } catch (err) {
+        console.error(`[Lordflix] Error: ${err.message}`);
+        return [];
+    }
 }
 
 module.exports = { getLordflixStreams };
