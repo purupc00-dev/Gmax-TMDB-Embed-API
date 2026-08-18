@@ -6,86 +6,113 @@ const VIDLINK_HEADERS = {
   'Origin': 'https://vidlink.pro'
 };
 
+function formatBytes(bytes) {
+  if (!bytes || isNaN(bytes)) return '';
+  const num = parseInt(bytes, 10);
+  if (num === 0) return '';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(num) / Math.log(k));
+  return parseFloat((num / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 async function getVidlinkStreams(tmdbId, mediaType = 'movie', seasonNum = null, episodeNum = null) {
   console.log(`[Vidlink] Fetching streams for TMDB ID: ${tmdbId}, Type: ${mediaType}`);
 
   try {
-    // Step 1: Hit enc-dec.app
+    const type = mediaType === 'tv' || mediaType === 'series' ? 'tv' : 'movie';
+    const queryParam = type === 'tv' ? `${tmdbId}/${seasonNum}/${episodeNum}` : String(tmdbId);
+
+    // Step 1: Query enc-dec.app
     const encRes = await axios.get(
-      `https://enc-dec.app/api/enc-vidlink?text=${encodeURIComponent(String(tmdbId))}`,
+      `https://enc-dec.app/api/enc-vidlink?text=${encodeURIComponent(queryParam)}`,
       { timeout: 10000 }
     );
-    
+
     const resData = encRes.data;
     const streams = [];
 
-    // NEW BEHAVIOR: enc-dec.app directly returns the stream JSON payload
+    // Format A: Direct Stream JSON Payload with qualities (1080, 480, 360)
     if (resData && resData.stream) {
-        console.log('[Vidlink] Received direct stream payload from enc-dec.app');
-        const streamData = resData.stream;
-        
-        // Loop through the qualities (1080, 480, 360) and extract the direct .mp4 links
-        if (streamData.qualities) {
-            for (const [quality, src] of Object.entries(streamData.qualities)) {
-                if (src && src.url) {
-                    streams.push({
-                        name: `Vidlink (${quality}p)`,
-                        title: `Vidlink - ${quality}p`,
-                        url: src.url,
-                        quality: `${quality}p`,
-                        provider: 'Vidlink',
-                        headers: VIDLINK_HEADERS
-                    });
-                }
-            }
-        } 
-        // Fallback if they return a single playlist instead of distinct qualities
-        else if (streamData.playlist) {
+      const streamData = resData.stream;
+
+      if (streamData.qualities && typeof streamData.qualities === 'object') {
+        for (const [qualityKey, mediaObj] of Object.entries(streamData.qualities)) {
+          if (mediaObj && mediaObj.url) {
+            const qualityLabel = `${qualityKey}p`;
+            const sizeStr = formatBytes(mediaObj.size);
+
             streams.push({
-                name: 'Vidlink',
-                title: 'Vidlink - Auto',
-                url: streamData.playlist,
-                quality: 'Auto',
-                provider: 'Vidlink',
-                headers: VIDLINK_HEADERS
+              name: `Vidlink (${qualityLabel})`,
+              title: `Vidlink - ${qualityLabel}${sizeStr ? ` [${sizeStr}]` : ''}`,
+              url: mediaObj.url,
+              quality: qualityLabel,
+              size: sizeStr,
+              provider: 'Vidlink',
+              headers: VIDLINK_HEADERS
             });
+          }
         }
-        
-        if (streams.length > 0) return streams;
+      } else if (streamData.playlist) {
+        streams.push({
+          name: 'Vidlink',
+          title: 'Vidlink - Auto',
+          url: streamData.playlist,
+          quality: 'Auto',
+          provider: 'Vidlink',
+          headers: VIDLINK_HEADERS
+        });
+      }
+
+      if (streams.length > 0) {
+        console.log(`[Vidlink] Successfully extracted ${streams.length} stream(s).`);
+        return streams;
+      }
     }
 
-    // OLD BEHAVIOR FALLBACK: enc-dec.app returns an encrypted token string
+    // Format B: Token fallback if enc-dec.app returns an encrypted string
     const encodedTmdb = resData?.result || resData?.text || (typeof resData === 'string' ? resData : null);
-    
-    if (!encodedTmdb || typeof encodedTmdb !== 'string') {
-      console.log('[Vidlink] Could not resolve token or direct stream.');
-      return [];
+
+    if (encodedTmdb && typeof encodedTmdb === 'string') {
+      const apiUrl = type === 'tv'
+        ? `https://vidlink.pro/api/b/tv/${encodedTmdb}/${seasonNum}/${episodeNum}?multiLang=0`
+        : `https://vidlink.pro/api/b/movie/${encodedTmdb}?multiLang=0`;
+
+      const apiRes = await axios.get(apiUrl, { headers: VIDLINK_HEADERS, timeout: 10000 });
+      const streamObj = apiRes.data?.stream;
+
+      if (streamObj?.qualities) {
+        for (const [qualityKey, mediaObj] of Object.entries(streamObj.qualities)) {
+          if (mediaObj && mediaObj.url) {
+            const qualityLabel = `${qualityKey}p`;
+            const sizeStr = formatBytes(mediaObj.size);
+
+            streams.push({
+              name: `Vidlink (${qualityLabel})`,
+              title: `Vidlink - ${qualityLabel}${sizeStr ? ` [${sizeStr}]` : ''}`,
+              url: mediaObj.url,
+              quality: qualityLabel,
+              size: sizeStr,
+              provider: 'Vidlink',
+              headers: VIDLINK_HEADERS
+            });
+          }
+        }
+      } else if (streamObj?.playlist || apiRes.data?.playlist) {
+        streams.push({
+          name: 'Vidlink',
+          title: 'Vidlink - Auto',
+          url: streamObj?.playlist || apiRes.data?.playlist,
+          quality: 'Auto',
+          provider: 'Vidlink',
+          headers: VIDLINK_HEADERS
+        });
+      }
     }
 
-    // Fetch stream playlist from Vidlink API using the token
-    const type = mediaType === 'tv' || mediaType === 'series' ? 'tv' : 'movie';
-    const apiUrl = type === 'tv'
-      ? `https://vidlink.pro/api/b/tv/${encodedTmdb}/${seasonNum}/${episodeNum}?multiLang=0`
-      : `https://vidlink.pro/api/b/movie/${encodedTmdb}?multiLang=0`;
+    console.log(`[Vidlink] Total streams resolved: ${streams.length}`);
+    return streams;
 
-    const apiRes = await axios.get(apiUrl, { headers: VIDLINK_HEADERS, timeout: 10000 });
-    const playlist = apiRes.data?.stream?.playlist || apiRes.data?.playlist;
-
-    if (!playlist) {
-      console.log('[Vidlink] No playlist URL in Vidlink API response.');
-      return [];
-    }
-
-    console.log('[Vidlink] Got stream successfully via token fallback.');
-    return [{
-      name: 'Vidlink',
-      title: 'Vidlink - Auto',
-      url: playlist,
-      quality: 'Auto',
-      provider: 'Vidlink',
-      headers: VIDLINK_HEADERS
-    }];
-    
   } catch (err) {
     console.error(`[Vidlink] Error: ${err.message}`);
     return [];
