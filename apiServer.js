@@ -85,45 +85,7 @@ process.exit = function(code){
   // keep process alive for debugging
 };
 setImmediate(()=>console.log('[diagnostic] post-start setImmediate fired'));
-
-// =========================================================
-// CHANGED: ADDED STRICT CORS AND ORIGIN CHECK 
-// (Replaced the generic app.use(cors()) here)
-// =========================================================
-const ALLOWED_ORIGINS = [
-  'https://gmaxhub.vercel.app',
-  'https://gmax-stream-proxy.gmaxstudioes.workers.dev'
-];
-
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  }
-}));
-
-app.use('/api', (req, res, next) => {
-  // Lock down only streams and providers to prevent scraping.
-  // /health, /metrics, and /config stay open for your admin panel.
-  if (req.path.startsWith('/streams') || req.path.startsWith('/providers')) {
-    const reqOrigin = req.get('Origin');
-    const reqReferer = req.get('Referer');
-    
-    const isAllowed = ALLOWED_ORIGINS.some(allowed => 
-      (reqOrigin && reqOrigin === allowed) || (reqReferer && reqReferer.startsWith(allowed))
-    );
-
-    if (!isAllowed) {
-      return res.status(403).json({ success: false, error: 'Access Denied. Internal API only.' });
-    }
-  }
-  next();
-});
-// =========================================================
-
+app.use(cors());
 app.use(express.json());
 
 // --- Auth Routes (login before static serving) ---
