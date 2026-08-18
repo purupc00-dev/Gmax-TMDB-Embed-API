@@ -14,7 +14,7 @@ const providerFunctionMap = {
   'vidlink.js': 'getVidlinkStreams',
   'lordflix.js': 'getLordflixStreams',
   'notorrent.js': 'getNotorrentStreams',
-  'dahmermovies.js': 'getDahmermoviesStreams',
+  'vidfast.js': 'getVidfastStreams',
   'shegu.js': 'getSheguStreams',
 };
 
