@@ -9,13 +9,18 @@ const providerCache = new Map();
 const providerFunctionMap = {
   'Showbox.js': 'getStreamsFromTmdbId',
   '4khdhub.js': 'get4KHDHubStreams',
-  'vixsrc.js': 'getVixsrcStreams',
+  'castletv.js': 'getCastletvStreams',
+  'hdghartv.js': 'getHdghartvStreams',
+  'netmirror.js': 'getNetmirrorStreams',
+  'notorrent.js': 'getNotorrentStreams',
+  'onetouchtv.js': 'getOnetouchtvStreams',
+  'shegu.js': 'getSheguStreams',
+  'streamflix.js': 'getStreamflixStreams',
+  'vaplayer.js': 'getVaplayerStreams',
   'videasy.js': 'getVideasyStreams',
   'vidlink.js': 'getVidlinkStreams',
-  'lordflix.js': 'getLordflixStreams',
-  'notorrent.js': 'getNotorrentStreams',
-  'vidfast.js': 'getVidfastStreams',
-  'shegu.js': 'getSheguStreams',
+  'vixsrc.js': 'getVixsrcStreams',
+  'zxcstreams.js': 'getZxcstreamsStreams',
 };
 
 // Stats for debug endpoint
